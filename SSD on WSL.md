@@ -84,6 +84,56 @@ pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 pip install --upgrade pip
 ```
 
+### 3.4 GPU加速训练配置（可选）
+
+如果你的电脑配有NVIDIA显卡（如RTX 30/40/50系列），可以启用GPU加速训练，显著提升训练速度。本教程已在RTX 5070 Ti（Blackwell架构）上验证通过。
+
+#### 3.4.1 Windows宿主机：安装WSL专用NVIDIA驱动
+
+1. 下载并安装最新的[NVIDIA WSL驱动](https://developer.nvidia.com/cuda/wsl)（版本需≥515.65.01）。
+2. 安装后重启Windows。
+3. 在PowerShell中运行`nvidia-smi`，确认驱动已加载且能看到GPU信息。
+
+#### 3.4.2 WSL内：无需手动安装CUDA Toolkit
+
+TensorFlow 2.15的pip包`tensorflow[and-cuda]==2.15.0.post1`会自动下载并安装匹配的CUDA库（如`nvidia-cublas-cu12`、`nvidia-cudnn-cu12`等）到虚拟环境中，因此**不需要**在WSL中手动安装系统级CUDA Toolkit或cuDNN。
+
+#### 3.4.3 环境变量配置（重要）
+
+为确保TensorFlow能找到这些动态库，在激活虚拟环境后，执行：
+
+```bash
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$HOME/SSD_cpu_gpu/lib/python3.10/site-packages/nvidia/cuda_runtime/lib:$HOME/SSD_cpu_gpu/lib/python3.10/site-packages/nvidia/cudnn/lib
+```
+
+建议将上述命令追加到`~/.bashrc`中，以便每次登录自动生效：
+
+```bash
+echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$HOME/SSD_cpu_gpu/lib/python3.10/site-packages/nvidia/cuda_runtime/lib:$HOME/SSD_cpu_gpu/lib/python3.10/site-packages/nvidia/cudnn/lib' >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### 3.4.4 验证GPU是否可用
+
+在虚拟环境中运行：
+
+```bash
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+```
+
+如果输出`[PhysicalDevice(name='/physical_device:GPU:0', device_type='GPU')]`，则表示GPU已成功启用。
+
+> **注意**：对于RTX 50系列（Blackwell架构），TensorFlow 2.15没有预编译内核，首次训练时会触发PTX即时编译警告（如`TensorFlow was not built with CUDA kernel binaries compatible with compute capability 12.0`），这是正常现象，编译完成后训练会正常进行，不会影响最终精度。
+
+#### 3.4.5 常见GPU相关问题
+
+| 现象                                               | 可能原因                      | 解决方法                                        |
+| :----------------------------------------------- | :------------------------ | :------------------------------------------ |
+| `nvidia-smi`显示驱动正常，但TensorFlow找不到GPU             | `LD_LIBRARY_PATH`未正确设置    | 执行3.4.3节的环境变量配置                             |
+| `Failed to call cuInit: UNKNOWN ERROR`           | WSL驱动未正确加载或版本过低           | 重启Windows，重新安装最新WSL驱动                       |
+| 训练时出现大量`Failed to compile generated PTX`警告       | GPU架构较新，TensorFlow需要JIT编译 | 可忽略，首次编译后会自动缓存                              |
+| `Could not load dynamic library 'libcudnn.so.8'` | cuDNN库路径缺失                | 检查`LD_LIBRARY_PATH`是否包含`nvidia/cudnn/lib`目录 |
+
 ***
 
 ## 4. 安装训练所需 Python 包
@@ -901,5 +951,7 @@ if __name__ == '__main__':
 - `port tensorflow as tf` 应当在 `from __future__` 之后。
 - **INT8 模型输出顺序**为 `[scores, boxes, num_detections, classes]`，类别为 0-based float32。
 - **评估脚本**使用正确的索引和类别转换，能够输出有效的 mAP。
-- \*\*多问D老师：\*\*完整开发日志<https://chat.deepseek.com/share/87xob6z57hebowsj0w>
+- **GPU训练时PTX编译警告**：对于RTX 5070 Ti等新架构显卡，TensorFlow 2.15没有预编译内核，会触发`ptxas does not support CC 12.0`警告，并回退到驱动编译。这是预期行为，请耐心等待首次编译完成（约5-15分钟），后续训练速度正常。
+- **环境变量LD\_LIBRARY\_PATH**：通过pip安装的CUDA库必须通过`LD_LIBRARY_PATH`暴露给TensorFlow，否则会报`libcudart.so`找不到的错误。务必按3.4.3节配置。
+- **多问D老师：**完整开发日志<https://chat.deepseek.com/share/87xob6z57hebowsj0w>
 
